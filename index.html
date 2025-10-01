@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>แบบฟอร์มเติมสต็อกสินค้า</title>
+  <style>
+    :root{
+      --brand:#0b5cff; --muted:#f6f7fb; --text:#222; --border:#e6e8ef;
+    }
+    *{box-sizing:border-box}
+    body{font-family:system-ui,Segoe UI,Roboto,TH Sarabun New,sans-serif;background:#fff;margin:0;color:var(--text)}
+    .wrap{max-width:920px;margin:24px auto;padding:0 16px}
+    .card{background:#fff;border:1px solid var(--border);border-radius:14px;box-shadow:0 2px 12px rgba(0,0,0,.04);overflow:hidden;margin-bottom:16px}
+    .head{background:linear-gradient(90deg,#0b5cff,#6ea8fe);color:#fff;padding:18px 16px}
+    .head h1{font-size:20px;margin:0}
+    .body{padding:16px}
+    label{display:block;font-weight:600;margin:14px 0 6px}
+    input[type="number"],input[type="text"],select{
+      width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:10px;outline:none
+    }
+    input[type="number"]:focus,select:focus,input[type="text"]:focus{border-color:#b6ccff;box-shadow:0 0 0 4px #e9f0ff}
+    .row{display:grid;gap:12px}
+    @media(min-width:720px){ .row{grid-template-columns: 1.2fr 1fr}}
+    .selected{font-size:13px;color:#0a58ca;margin-top:8px}
+    .divider{height:1px;background:var(--border);margin:14px 0}
+    button{
+      background:var(--brand);color:#fff;border:none;border-radius:10px;padding:12px 16px;font-size:16px;cursor:pointer
+    }
+    button:disabled{opacity:.6;cursor:not-allowed}
+    .pill{display:inline-block;background:#eef3ff;color:#0b5cff;border:1px solid #dbe6ff;border-radius:999px;padding:4px 10px;font-size:12px}
+    .success{background:#f0fff4;border:1px solid #c7f0d2;color:#146c2e;padding:10px;border-radius:10px}
+    .error{background:#fff5f5;border:1px solid #ffd6d6;color:#b42318;padding:10px;border-radius:10px}
+    .remove-btn{background:#e74c3c;margin-top:10px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="head">
+        <h1>เติมสต็อกสินค้า</h1>
+        <div class="pill">ดึงข้อมูลอัตโนมัติจาก Google Sheet</div>
+      </div>
+      <div class="body">
+        <div id="items-container"></div>
+
+        <button style="margin-top:8px" onclick="addItem()">+ เพิ่มรายการสินค้า</button>
+        <div class="divider"></div>
+        <button id="btnSubmit" disabled>บันทึกข้อมูล</button>
+        <div id="result" style="margin-top:12px"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const SPREADSHEET_ID = "1I9jAyU7UHXxbizMxpT5RghoyfnnYkBPetS39hS1BzH0";
+    const SHEET_NAME = "ListItem";
+    const WEBHOOK_URL = "https://n8n-p2sw2ng.p2scalw2ng.xyz/webhook-test/StockIN";
+    let productList = [];
+
+    async function fetchListItems() {
+      const url = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(SHEET_NAME)}`;
+      const res = await fetch(url);
+      const text = await res.text();
+      const jsonStr = text.substring(text.indexOf("{"), text.lastIndexOf("}") + 1);
+      const data = JSON.parse(jsonStr);
+      // ✅ ตัดหัวตารางทิ้งด้วย slice(1)
+      return (data.table.rows || [])
+        .slice(1)
+        .map(r => {
+          const c = r.c || [];
+          const sku = (c[0] && (c[0].f ?? String(c[0].v ?? ""))).trim();
+          const name = (c[1] && (c[1].f ?? String(c[1].v ?? ""))).trim();
+          return { sku, name };
+        })
+        .filter(x => x.sku || x.name);
+    }
+
+    function buildItemBlock(){
+      const div = document.createElement('div');
+      div.className = 'card';
+      div.innerHTML = `
+        <div class="body">
+          <label>เลือกรายการสินค้า</label>
+          <select class="product" disabled>
+            <option value="">— กำลังโหลดข้อมูลสินค้า —</option>
+          </select>
+          <div class="selected selectedInfo" style="display:none"></div>
+          <div class="row">
+            <div>
+              <label>จำนวน</label>
+              <input class="qty" type="number" min="1" step="1" placeholder="เช่น 1" />
+            </div>
+            <div>
+              <label>หมายเหตุ (ถ้ามี)</label>
+              <input class="note" type="text" placeholder="เช่น รับเข้า, คืนของ, ปรับสต็อก" />
+            </div>
+          </div>
+          <button class="remove-btn" onclick="this.closest('.card').remove();checkBtnSubmit()">ลบรายการนี้</button>
+        </div>
+      `;
+      return div;
+    }
+
+    function fillOptions(select){
+      select.innerHTML = `<option value="">— เลือกสินค้า —</option>`;
+      productList.forEach(r=>{
+        const opt=document.createElement('option');
+        opt.value=r.sku;
+        opt.dataset.name=r.name;
+        opt.textContent=`${r.name} — ${r.sku}`;
+        select.appendChild(opt);
+      });
+      select.disabled = productList.length===0;
+    }
+
+    function addItem(){
+      const container = document.getElementById('items-container');
+      const block = buildItemBlock();
+      container.appendChild(block);
+      const select = block.querySelector('.product');
+      fillOptions(select);
+      select.addEventListener('change',()=>{
+        const name=select.selectedOptions[0]?.dataset?.name||"";
+        const selInfo=block.querySelector('.selectedInfo');
+        if(select.value){
+          selInfo.style.display='block';
+          selInfo.textContent=`เลือกแล้ว: ${name} (รหัส: ${select.value})`;
+        }else selInfo.style.display='none';
+        checkBtnSubmit();
+      });
+      checkBtnSubmit();
+    }
+
+    function checkBtnSubmit(){
+      const hasSelect = [...document.querySelectorAll('.product')].some(s=>s.value);
+      document.getElementById('btnSubmit').disabled = !hasSelect;
+    }
+
+    async function submitPayload(){
+      const payloads = [...document.querySelectorAll('#items-container .card')].map(b=>{
+        const s = b.querySelector('.product');
+        const sku = s.value;
+        const name = s.selectedOptions[0]?.dataset?.name || "";
+        const qty = parseInt(b.querySelector('.qty').value || "0", 10);
+        const note = b.querySelector('.note').value;
+        return { action:"stock_in", sku, name, qty, note, timestamp_iso:new Date().toISOString() };
+      }).filter(x=>x.sku);
+      const resultDiv = document.getElementById('result');
+
+      try {
+        const resp = await fetch(WEBHOOK_URL, {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify(payloads)
+        });
+        const text = await resp.text();
+        let respJson = {};
+        try { respJson = JSON.parse(text); } catch {}
+        resultDiv.innerHTML = `<div class="success">ส่งสำเร็จ 🎉<br><pre>${JSON.stringify(respJson||text,null,2)}</pre></div>`;
+      } catch (err){
+        resultDiv.innerHTML = `<div class="error">ส่งไม่สำเร็จ: ${err.message}</div>`;
+      }
+    }
+
+    document.getElementById('btnSubmit').addEventListener('click',submitPayload);
+
+    (async function init(){
+      productList = await fetchListItems();
+      addItem(); // เริ่มต้นให้ 1 บรรทัด
+    })();
+  </script>
+</body>
+</html>
