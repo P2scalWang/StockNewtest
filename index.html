@@ -42,8 +42,20 @@
         <div class="pill">ดึงข้อมูลอัตโนมัติจาก Google Sheet</div>
       </div>
       <div class="body">
-        <div id="items-container"></div>
 
+        <!-- เอกสารอ้างอิง -->
+        <label>เอกสารอ้างอิง</label>
+        <input id="docRef" type="text" placeholder="เช่น PO-12345 หรือ INV-67890" />
+
+        <!-- เลือกร้าน -->
+        <label style="margin-top:14px;">เลือกร้าน</label>
+        <select id="shopSelect" disabled>
+          <option value="">— กำลังโหลดข้อมูลร้าน —</option>
+        </select>
+
+        <div class="divider"></div>
+
+        <div id="items-container"></div>
         <button style="margin-top:8px" onclick="addItem()">+ เพิ่มรายการสินค้า</button>
         <div class="divider"></div>
         <button id="btnSubmit" disabled>บันทึกข้อมูล</button>
@@ -54,26 +66,39 @@
 
   <script>
     const SPREADSHEET_ID = "1I9jAyU7UHXxbizMxpT5RghoyfnnYkBPetS39hS1BzH0";
-    const SHEET_NAME = "ListItem";
+    const ITEM_SHEET = "ListItem";
+    const SHOP_SHEET = "CompanyName";
     const WEBHOOK_URL = "https://n8n-p2sw2ng.p2scalw2ng.xyz/webhook-test/StockIN";
-    let productList = [];
 
-    async function fetchListItems() {
-      const url = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(SHEET_NAME)}`;
+    let productList = [];
+    let shopList = [];
+
+    async function fetchSheet(sheetName) {
+      const url = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}`;
       const res = await fetch(url);
       const text = await res.text();
       const jsonStr = text.substring(text.indexOf("{"), text.lastIndexOf("}") + 1);
       const data = JSON.parse(jsonStr);
-      // ✅ ตัดหัวตารางทิ้งด้วย slice(1)
-      return (data.table.rows || [])
-        .slice(1)
-        .map(r => {
-          const c = r.c || [];
-          const sku = (c[0] && (c[0].f ?? String(c[0].v ?? ""))).trim();
-          const name = (c[1] && (c[1].f ?? String(c[1].v ?? ""))).trim();
-          return { sku, name };
-        })
-        .filter(x => x.sku || x.name);
+      return data.table.rows || [];
+    }
+
+    async function fetchListItems() {
+      const rows = await fetchSheet(ITEM_SHEET);
+      return rows.slice(1).map(r => {
+        const c = r.c || [];
+        const sku = (c[0]?.f ?? String(c[0]?.v ?? "")).trim();
+        const name = (c[1]?.f ?? String(c[1]?.v ?? "")).trim();
+        return { sku, name };
+      }).filter(x => x.sku || x.name);
+    }
+
+    async function fetchShops() {
+      const rows = await fetchSheet(SHOP_SHEET);
+      return rows.slice(1).map(r => {
+        const c = r.c || [];
+        const shop = (c[0]?.f ?? String(c[0]?.v ?? "")).trim();
+        return shop;
+      }).filter(Boolean);
     }
 
     function buildItemBlock(){
@@ -102,16 +127,20 @@
       return div;
     }
 
-    function fillOptions(select){
-      select.innerHTML = `<option value="">— เลือกสินค้า —</option>`;
-      productList.forEach(r=>{
+    function fillOptions(select, list, placeholder, valueKey = "sku", textKey = "name"){
+      select.innerHTML = `<option value="">— ${placeholder} —</option>`;
+      list.forEach(r=>{
         const opt=document.createElement('option');
-        opt.value=r.sku;
-        opt.dataset.name=r.name;
-        opt.textContent=`${r.name} — ${r.sku}`;
+        if(typeof r === "string"){
+          opt.value = r; opt.textContent = r;
+        }else{
+          opt.value=r[valueKey];
+          opt.dataset.name=r[textKey];
+          opt.textContent=`${r[textKey]} — ${r[valueKey]}`;
+        }
         select.appendChild(opt);
       });
-      select.disabled = productList.length===0;
+      select.disabled = list.length===0;
     }
 
     function addItem(){
@@ -119,7 +148,7 @@
       const block = buildItemBlock();
       container.appendChild(block);
       const select = block.querySelector('.product');
-      fillOptions(select);
+      fillOptions(select, productList, "เลือกสินค้า");
       select.addEventListener('change',()=>{
         const name=select.selectedOptions[0]?.dataset?.name||"";
         const selInfo=block.querySelector('.selectedInfo');
@@ -133,21 +162,24 @@
     }
 
     function checkBtnSubmit(){
+      const shopSelected = document.getElementById('shopSelect').value;
       const hasSelect = [...document.querySelectorAll('.product')].some(s=>s.value);
-      document.getElementById('btnSubmit').disabled = !hasSelect;
+      document.getElementById('btnSubmit').disabled = !(shopSelected && hasSelect);
     }
 
     async function submitPayload(){
+      const shop = document.getElementById('shopSelect').value;
+      const docRef = document.getElementById('docRef').value;
       const payloads = [...document.querySelectorAll('#items-container .card')].map(b=>{
         const s = b.querySelector('.product');
         const sku = s.value;
         const name = s.selectedOptions[0]?.dataset?.name || "";
         const qty = parseInt(b.querySelector('.qty').value || "0", 10);
         const note = b.querySelector('.note').value;
-        return { action:"stock_in", sku, name, qty, note, timestamp_iso:new Date().toISOString() };
+        return { action:"stock_in", shop, doc_ref:docRef, sku, name, qty, note, timestamp_iso:new Date().toISOString() };
       }).filter(x=>x.sku);
-      const resultDiv = document.getElementById('result');
 
+      const resultDiv = document.getElementById('result');
       try {
         const resp = await fetch(WEBHOOK_URL, {
           method:'POST',
@@ -164,10 +196,12 @@
     }
 
     document.getElementById('btnSubmit').addEventListener('click',submitPayload);
+    document.getElementById('shopSelect').addEventListener('change',checkBtnSubmit);
 
     (async function init(){
-      productList = await fetchListItems();
-      addItem(); // เริ่มต้นให้ 1 บรรทัด
+      [productList, shopList] = await Promise.all([fetchListItems(), fetchShops()]);
+      fillOptions(document.getElementById('shopSelect'), shopList, "เลือกร้าน");
+      addItem();
     })();
   </script>
 </body>
