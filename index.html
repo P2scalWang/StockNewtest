@@ -350,50 +350,51 @@
       return JSON.parse(m[1]);
     };
 
-    async function fetchLicensePlates() {
-      const selectEl = document.getElementById('licenseSelect');
-      selectEl.innerHTML = `<option value="">⏳ กำลังโหลด...</option>`;
-      try {
-        // ดึงเฉพาะคอลัมน์ G (ทะเบียน) เท่านั้น
-        const q = "select G where G is not null limit 1000";
-        const res = await fetch(GVIZ_URL(q));
-        const json = parseGviz(await res.text());
-        const rows = (json.table && json.table.rows) || [];
+    // ...existing code...
+async function fetchLicensePlates() {
+  const selectEl = document.getElementById('licenseSelect');
+  selectEl.innerHTML = `<option value="">⏳ กำลังโหลด...</option>`;
+  try {
+    // เพิ่มเงื่อนไข where V != 'Done' เพื่อกรองสถานะ
+    const q = "select G where G is not null and V != 'Done' limit 1000";
+    const res = await fetch(GVIZ_URL(q));
+    const json = parseGviz(await res.text());
+    const rows = (json.table && json.table.rows) || [];
 
-        // ถ้าไม่มีข้อมูลเลย
-        if (!rows.length) {
-          selectEl.innerHTML = `<option value="">❌ ไม่มีรายการทะเบียนรถ</option>`;
-          return;
-        }
-
-        // ใช้ค่าจากคอลัมน์ G ทุกแถวโดยตรง (ไม่ตรวจสอบชื่อหัวตาราง)
-        const start = 0;
-
-        const plates = rows
-          .slice(start)
-          .map(r => String((r.c && r.c[0] && r.c[0].v) || '').trim())
-          .filter(v => v); // กรองค่าว่าง
-
-        const unique = [...new Set(plates)];
-        if (unique.length === 0) {
-          selectEl.innerHTML = `<option value="">❌ ไม่มีรายการทะเบียนรถ</option>`;
-          return;
-        }
-
-        unique.sort((a,b) => a.localeCompare(b, 'th')); // เรียงตัวอักษรแบบธรรมดา
-        selectEl.innerHTML = `<option value="">— เลือกทะเบียนรถ (${unique.length} รายการ) —</option>`;
-        unique.forEach(v => {
-          const opt = document.createElement('option');
-          opt.value = v;
-          opt.textContent = v;
-          selectEl.appendChild(opt);
-        });
-      } catch (err) {
-        console.error('Error:', err);
-        alert('⚠️ โหลดรายการทะเบียนรถไม่สำเร็จ\n\nกรุณาตรวจสอบ:\n1) ชีตเปิดสิทธิ์ "Anyone with the link can view"\n2) ใช้แท็บ (gid) ถูกต้อง\n\nError: ' + err.message);
-        selectEl.innerHTML = `<option value="">❌ โหลดไม่สำเร็จ - กดรีเฟรช</option>`;
-      }
+    // ถ้าไม่มีข้อมูลเลย
+    if (!rows.length) {
+      selectEl.innerHTML = `<option value="">❌ ไม่มีรายการทะเบียนรถที่รอดำเนินการ</option>`;
+      return;
     }
+
+    // ใช้ค่าจากคอลัมน์ G ที่ไม่ใช่ Done
+    const start = 0;
+    const plates = rows
+      .slice(start)
+      .map(r => String((r.c && r.c[0] && r.c[0].v) || '').trim())
+      .filter(v => v);
+
+    const unique = [...new Set(plates)];
+    if (unique.length === 0) {
+      selectEl.innerHTML = `<option value="">❌ ไม่มีรายการทะเบียนรถที่รอดำเนินการ</option>`;
+      return;
+    }
+
+    unique.sort((a,b) => a.localeCompare(b, 'th'));
+    selectEl.innerHTML = `<option value="">— เลือกทะเบียนรถที่รอดำเนินการ (${unique.length} รายการ) —</option>`;
+    unique.forEach(v => {
+      const opt = document.createElement('option');
+      opt.value = v;
+      opt.textContent = v;
+      selectEl.appendChild(opt);
+    });
+  } catch (err) {
+    console.error('Error:', err);
+    alert('⚠️ โหลดรายการทะเบียนรถไม่สำเร็จ\n\nกรุณาตรวจสอบ:\n1) ชีตเปิดสิทธิ์ "Anyone with the link can view"\n2) ใช้แท็บ (gid) ถูกต้อง\n\nError: ' + err.message);
+    selectEl.innerHTML = `<option value="">❌ โหลดไม่สำเร็จ - กดรีเฟรช</option>`;
+  }
+}
+// ...existing code...
 
     // รีเฟรชรายวัน: เรียกอีกครั้งเมื่อถึงเที่ยงคืนถัดไป แล้วทุก 24 ชั่วโมง
     function scheduleDailyRefresh() {
