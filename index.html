@@ -350,51 +350,47 @@
       return JSON.parse(m[1]);
     };
 
-    // ...existing code...
-async function fetchLicensePlates() {
-  const selectEl = document.getElementById('licenseSelect');
-  selectEl.innerHTML = `<option value="">⏳ กำลังโหลด...</option>`;
-  try {
-    // เพิ่มเงื่อนไข where V != 'Done' เพื่อกรองสถานะ
-    const q = "select G where G is not null and V != 'Done' limit 1000";
-    const res = await fetch(GVIZ_URL(q));
-    const json = parseGviz(await res.text());
-    const rows = (json.table && json.table.rows) || [];
+    async function fetchLicensePlates() {
+      const selectEl = document.getElementById('licenseSelect');
+      selectEl.innerHTML = `<option value="">⏳ กำลังโหลด...</option>`;
+      try {
+        // แก้ไข query ให้ตรวจสอบแบบไม่สนใจตัวพิมพ์เล็ก-ใหญ่
+        const q = "select G where G is not null and lower(V) != 'done' limit 1000";
+        const res = await fetch(GVIZ_URL(q));
+        const json = parseGviz(await res.text());
+        const rows = (json.table && json.table.rows) || [];
 
-    // ถ้าไม่มีข้อมูลเลย
-    if (!rows.length) {
-      selectEl.innerHTML = `<option value="">❌ ไม่มีรายการทะเบียนรถที่รอดำเนินการ</option>`;
-      return;
+        // ถ้าไม่มีข้อมูลเลย
+        if (!rows.length) {
+          selectEl.innerHTML = `<option value="">❌ ไม่มีรายการทะเบียนรถที่รอดำเนินการ</option>`;
+          return;
+        }
+
+        // ใช้ค่าจากคอลัมน์ G ที่ไม่ใช่ Done และกรองค่าว่างออก
+        const plates = rows
+          .map(r => String((r.c && r.c[0] && r.c[0].v) || '').trim())
+          .filter(v => v && v !== 'null' && v !== 'undefined');
+
+        const unique = [...new Set(plates)];
+        if (unique.length === 0) {
+          selectEl.innerHTML = `<option value="">❌ ไม่มีรายการทะเบียนรถที่รอดำเนินการ</option>`;
+          return;
+        }
+
+        unique.sort((a,b) => a.localeCompare(b, 'th'));
+        selectEl.innerHTML = `<option value="">— เลือกทะเบียนรถที่รอดดำเนินการ (${unique.length} รายการ) —</option>`;
+        unique.forEach(v => {
+          const opt = document.createElement('option');
+          opt.value = v;
+          opt.textContent = v;
+          selectEl.appendChild(opt);
+        });
+      } catch (err) {
+        console.error('Error:', err);
+        alert('⚠️ โหลดรายการทะเบียนรถไม่สำเร็จ\n\nกรุณาตรวจสอบ:\n1) ชีตเปิดสิทธิ์ "Anyone with the link can view"\n2) ใช้แท็บ (gid) ถูกต้อง\n\nError: ' + err.message);
+        selectEl.innerHTML = `<option value="">❌ โหลดไม่สำเร็จ - กดรีเฟรช</option>`;
+      }
     }
-
-    // ใช้ค่าจากคอลัมน์ G ที่ไม่ใช่ Done
-    const start = 0;
-    const plates = rows
-      .slice(start)
-      .map(r => String((r.c && r.c[0] && r.c[0].v) || '').trim())
-      .filter(v => v);
-
-    const unique = [...new Set(plates)];
-    if (unique.length === 0) {
-      selectEl.innerHTML = `<option value="">❌ ไม่มีรายการทะเบียนรถที่รอดำเนินการ</option>`;
-      return;
-    }
-
-    unique.sort((a,b) => a.localeCompare(b, 'th'));
-    selectEl.innerHTML = `<option value="">— เลือกทะเบียนรถที่รอดำเนินการ (${unique.length} รายการ) —</option>`;
-    unique.forEach(v => {
-      const opt = document.createElement('option');
-      opt.value = v;
-      opt.textContent = v;
-      selectEl.appendChild(opt);
-    });
-  } catch (err) {
-    console.error('Error:', err);
-    alert('⚠️ โหลดรายการทะเบียนรถไม่สำเร็จ\n\nกรุณาตรวจสอบ:\n1) ชีตเปิดสิทธิ์ "Anyone with the link can view"\n2) ใช้แท็บ (gid) ถูกต้อง\n\nError: ' + err.message);
-    selectEl.innerHTML = `<option value="">❌ โหลดไม่สำเร็จ - กดรีเฟรช</option>`;
-  }
-}
-// ...existing code...
 
     // รีเฟรชรายวัน: เรียกอีกครั้งเมื่อถึงเที่ยงคืนถัดไป แล้วทุก 24 ชั่วโมง
     function scheduleDailyRefresh() {
